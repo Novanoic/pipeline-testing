@@ -1,0 +1,203 @@
+name: Build and Deploy To Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_type:
+        description: "Version type (major, minor, patch)"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      custom_tag:
+        description: "Custom tag (optional, overrides version type)"
+        required: false
+        type: string
+
+jobs:
+  tag:
+    runs-on: "ubuntu-22.04"
+    permissions:
+      contents: write
+    outputs:
+      VERSION: ${{ steps.final-tag.outputs.VERSION }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Ensure full history and tags are available
+      - name: Get Current Branch and Latest Tag
+        id: tags
+        run: |
+          # Get the current branch
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          echo "Current branch is: $CURRENT_BRANCH"
+          # Retrieve the latest tag (assumes semantic versioning)
+          LATEST_TAG=$(git tag --sort=-v:refname | head -n 1)
+          echo "Latest tag is: $LATEST_TAG"
+          echo "current_branch=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+      - name: Tag with New Version
+        id: final-tag
+        env:
+          VERSION_NUMBER_TYPE: ${{ github.event.inputs.VersionNumberType }}
+          CURRENT_BRANCH: ${{ steps.tags.outputs.current_branch }}
+          LATEST_TAG: ${{ steps.tags.outputs.latest_tag }}
+        run: |
+          set -e
+          echo "Version number type: $VERSION_NUMBER_TYPE"
+
+          if [ "$VERSION_NUMBER_TYPE" = "use_existing" ]; then
+            echo "Using existing tag: $LATEST_TAG"
+            echo "VERSION=$LATEST_TAG" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          if [ "$CURRENT_BRANCH" != "main" ]; then
+            echo "Error: Tagging can only be done on main branch. Current branch: $CURRENT_BRANCH"
+            exit 1
+          fi
+
+          # Parse version components from the latest tag (expects format MAJOR.MINOR.PATCH)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST_TAG"
+          echo "Parsed version: MAJOR=$MAJOR, MINOR=$MINOR, PATCH=$PATCH"
+
+          if [ "$VERSION_NUMBER_TYPE" = "major" ]; then
+            NEW_TAG=$((MAJOR + 1)).0.0
+          elif [ "$VERSION_NUMBER_TYPE" = "minor" ]; then
+            NEW_TAG=$MAJOR.$((MINOR + 1)).0
+          elif [ "$VERSION_NUMBER_TYPE" = "patch" ]; then
+            NEW_TAG=$MAJOR.$MINOR.$((PATCH + 1))
+          else
+            echo "Invalid VersionNumberType provided: $VERSION_NUMBER_TYPE"
+            exit 1
+          fi
+
+          echo "New tag will be: $NEW_TAG"
+          # Configure git so that the GitHub Actions bot can tag
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag "$NEW_TAG"
+          git push origin "$NEW_TAG"
+          echo "VERSION=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "$NEW_TAG"
+  # prepare-env:
+  #   name: Prepare Env
+  #   runs-on: "ubuntu-22.04"
+  #   needs:
+  #     - tag
+  #   ##timeout-minutes: 2
+  #   outputs:
+  #     AWS_ROLE: ${{ steps.vars.outputs.AWS_ROLE }}
+  #     ENV: ${{ steps.vars.outputs.ENV }}
+  #     PROJECT_PREFIX: ${{ steps.vars.outputs.PROJECT_PREFIX }}
+  #     ECS_CLUSTER: ${{ steps.set_env.outputs.ECS_CLUSTER }}
+  #     ECR_REPOSITORY: ${{ steps.set_env.outputs.ECR_REPOSITORY }}
+  #     AWS_REGION: ${{ steps.vars.outputs.AWS_REGION }}
+  #     RELEASE_TAG: ${{ steps.vars.outputs.RELEASE_TAG }}
+  #   steps:
+  #     - id: vars
+  #       run: |
+  #         echo "AWS_ROLE=${{ vars.PRD_AWS_ROLE }}" >> $GITHUB_OUTPUT
+  #         echo "PROJECT_PREFIX=${{ vars.PRD_PROJECT_PREFIX }}" >> $GITHUB_OUTPUT
+  #         echo "AWS_REGION=${{ vars.PRD_AWS_REGION }}" >> $GITHUB_OUTPUT
+  #         echo "ENV=prd"  >> $GITHUB_OUTPUT
+  #         echo "RELEASE_TAG=${{needs.tag.outputs.VERSION}}"  >> $GITHUB_OUTPUT
+  #         echo "SUBNETS=[\"subnet-002c11cc95cc02046\", \"subnet-0399611f86ca30c5a\"]" >> $GITHUB_OUTPUT
+  #         echo "SECURITY_GROUPS=[\"sg-0440306b83c0461d7\"]" >> $GITHUB_OUTPUT
+  #         echo ":seedling: Git Release - ${GITHUB_REF/refs\/tags\//}" >> $GITHUB_STEP_SUMMARY
+  #         echo ":rocket: Environment - prd" >> $GITHUB_STEP_SUMMARY
+  #     - name: set variables
+  #       id: set_env
+  #       run: |
+  #         PROJECT_PREFIX=${{ steps.vars.outputs.PROJECT_PREFIX }}
+  #         echo "ECS_CLUSTER=$PROJECT_PREFIX-ecs-cluster"  >> $GITHUB_OUTPUT
+  #         echo "ECR_REPOSITORY=$PROJECT_PREFIX-ecr-$SERVICE_NAME"  >> $GITHUB_OUTPUT
+
+  # # Building and Pushing Image to ECR
+  # build-push-image:
+  #   name: Build and Push Image
+  #   runs-on: "ubuntu-22.04"
+  #   permissions:
+  #     id-token: write
+  #     pull-requests: write
+  #     contents: read
+  #   needs:
+  #     - prepare-env
+  #   env:
+  #     PROJECT_PREFIX: ${{needs.prepare-env.outputs.PROJECT_PREFIX}}
+  #   outputs:
+  #     APP_IMAGE: ${{ steps.build_and_push.outputs.APP_IMAGE }}
+  #   steps:
+  #     - name: checkout
+  #       uses: actions/checkout@v4
+  #     - name: build and push
+  #       id: build_and_push
+  #       uses: ./.github/actions/build-push
+  #       with:
+  #         aws-region: ${{needs.prepare-env.outputs.AWS_REGION}}
+  #         aws-role: ${{ needs.prepare-env.outputs.AWS_ROLE }}
+  #         ecr-repository: ${{needs.prepare-env.outputs.ECR_REPOSITORY}}
+  #         release-tag: ${{ needs.prepare-env.outputs.RELEASE_TAG }}
+  #         ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+  # # Run DB migration as task
+  # run-db-migration:
+  #   name: Run the DB migration
+  #   runs-on: "ubuntu-22.04"
+  #   permissions:
+  #     id-token: write
+  #     pull-requests: write
+  #     contents: read
+  #   needs:
+  #     - prepare-env
+  #     - build-push-image
+  #   env:
+  #     PROJECT_PREFIX: ${{needs.prepare-env.outputs.PROJECT_PREFIX}}
+  #   steps:
+  #     - name: checkout
+  #       uses: actions/checkout@v4
+  #     - name: run db migration
+  #       id: run_db_migration
+  #       uses: ./.github/actions/run-migration
+  #       with:
+  #         aws-region: ${{needs.prepare-env.outputs.AWS_REGION}}
+  #         aws-role: ${{ needs.prepare-env.outputs.AWS_ROLE }}
+  #         task-definition: "${{ env.PROJECT_PREFIX }}-td-${{ vars.SERVICE_NAME }}-dbmigrate"
+  #         container-name: "${{ env.PROJECT_PREFIX }}-cntr-${{ vars.SERVICE_NAME }}-dbmigrate"
+  #         ecs-cluster: ${{ needs.prepare-env.outputs.ECS_CLUSTER }}
+  #         image: ${{ needs.build-push-image.outputs.APP_IMAGE }}
+  #         subnets: ${{ needs.prepare-env.outputs.SUBNETS }}
+  #         security-groups: ${{ needs.prepare-env.outputs.SECURITY_GROUPS }}
+
+  # # deploy to ECS Api Service
+  # deploy-to-ecs-service:
+  #   name: Deploy to ECS backend core service
+  #   runs-on: "ubuntu-22.04"
+  #   permissions:
+  #     id-token: write
+  #     pull-requests: write
+  #     contents: read
+  #   needs:
+  #     - prepare-env
+  #     - build-push-image
+  #     - run-db-migration
+  #   env:
+  #     PROJECT_PREFIX: ${{needs.prepare-env.outputs.PROJECT_PREFIX}}
+  #   steps:
+  #     - name: checkout
+  #       uses: actions/checkout@v4
+  #     - name: deploy backend
+  #       id: deploy_backend
+  #       uses: ./.github/actions/deploy-ecs
+  #       with:
+  #         aws-region: ${{needs.prepare-env.outputs.AWS_REGION}}
+  #         aws-role: ${{ needs.prepare-env.outputs.AWS_ROLE }}
+  #         task-definition: "${{ env.PROJECT_PREFIX }}-td-${{ vars.SERVICE_NAME }}"
+  #         container-name: "${{ env.PROJECT_PREFIX }}-cntr-${{ vars.SERVICE_NAME }}"
+  #         ecs-service: "${{ env.PROJECT_PREFIX }}-svc-${{ vars.SERVICE_NAME }}"
+  #         ecs-cluster: ${{ needs.prepare-env.outputs.ECS_CLUSTER }}
+  #         image: ${{ needs.build-push-image.outputs.APP_IMAGE }}
