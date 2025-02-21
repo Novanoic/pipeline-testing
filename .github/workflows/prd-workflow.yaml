@@ -1,4 +1,4 @@
-name: Build and Deploy To Production
+name: Manual Tag
 
 on:
   workflow_dispatch:
@@ -18,72 +18,57 @@ on:
 
 jobs:
   tag:
-    runs-on: "ubuntu-22.04"
+    runs-on: ubuntu-latest
     permissions:
       contents: write
-    outputs:
-      VERSION: ${{ steps.final-tag.outputs.VERSION }}
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Ensure full history and tags are available
-      - name: Get Current Branch and Latest Tag
-        id: tags
+          fetch-depth: 0
+
+      - name: Configure Git
         run: |
-          # Get the current branch
-          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-          echo "Current branch is: $CURRENT_BRANCH"
-          # Retrieve the latest tag (assumes semantic versioning)
-          LATEST_TAG=$(git tag --sort=-v:refname | head -n 1)
-          echo "Latest tag is: $LATEST_TAG"
-          echo "current_branch=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
-          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          git config user.name "Cofee Admin"
+          git config user.email "cofee-devops@keyvalue.systems"
 
-      - name: Tag with New Version
-        id: final-tag
-        env:
-          VERSION_NUMBER_TYPE: ${{ github.event.inputs.VersionNumberType }}
-          CURRENT_BRANCH: ${{ steps.tags.outputs.current_branch }}
-          LATEST_TAG: ${{ steps.tags.outputs.latest_tag }}
+      - name: Get latest tag
+        id: get_latest_tag
         run: |
-          set -e
-          echo "Version number type: $VERSION_NUMBER_TYPE"
+          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+          echo "LATEST_TAG=$latest_tag" >> $GITHUB_ENV
 
-          if [ "$VERSION_NUMBER_TYPE" = "use_existing" ]; then
-            echo "Using existing tag: $LATEST_TAG"
-            echo "VERSION=$LATEST_TAG" >> $GITHUB_ENV
-            exit 0
-          fi
+          # Extract version numbers
+          version=${latest_tag}
+          IFS='.' read -r major minor patch <<< "$version"
+          echo "MAJOR=$major" >> $GITHUB_ENV
+          echo "MINOR=$minor" >> $GITHUB_ENV
+          echo "PATCH=$patch" >> $GITHUB_ENV
 
-          if [ "$CURRENT_BRANCH" != "main" ]; then
-            echo "Error: Tagging can only be done on main branch. Current branch: $CURRENT_BRANCH"
-            exit 1
-          fi
-
-          # Parse version components from the latest tag (expects format MAJOR.MINOR.PATCH)
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST_TAG"
-          echo "Parsed version: MAJOR=$MAJOR, MINOR=$MINOR, PATCH=$PATCH"
-
-          if [ "$VERSION_NUMBER_TYPE" = "major" ]; then
-            NEW_TAG=$((MAJOR + 1)).0.0
-          elif [ "$VERSION_NUMBER_TYPE" = "minor" ]; then
-            NEW_TAG=$MAJOR.$((MINOR + 1)).0
-          elif [ "$VERSION_NUMBER_TYPE" = "patch" ]; then
-            NEW_TAG=$MAJOR.$MINOR.$((PATCH + 1))
+      - name: Create new tag
+        id: create_tag
+        run: |
+          if [ -n "${{ inputs.custom_tag }}" ]; then
+            new_tag="${{ inputs.custom_tag }}"
           else
-            echo "Invalid VersionNumberType provided: $VERSION_NUMBER_TYPE"
-            exit 1
+            case "${{ inputs.version_type }}" in
+              major)
+                new_tag="$((MAJOR + 1)).0.0"
+                ;;
+              minor)
+                new_tag="$MAJOR.$((MINOR + 1)).0"
+                ;;
+              patch)
+                new_tag="$MAJOR.$MINOR.$((PATCH + 1))"
+                ;;
+            esac
           fi
 
-          echo "New tag will be: $NEW_TAG"
-          # Configure git so that the GitHub Actions bot can tag
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git tag "$NEW_TAG"
-          git push origin "$NEW_TAG"
-          echo "VERSION=$NEW_TAG" >> $GITHUB_OUTPUT
-          echo "$NEW_TAG"
+          echo "NEW_TAG=$new_tag" >> $GITHUB_ENV
+
+          # Create and push tag
+          git tag -a $new_tag -m "Release $new_tag"
+          git push origin $new_tag
+          echo "Created and pushed tag: $new_tag"
   # prepare-env:
   #   name: Prepare Env
   #   runs-on: "ubuntu-22.04"
