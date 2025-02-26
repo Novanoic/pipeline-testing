@@ -12,7 +12,7 @@ on:
           - master
 jobs:
   create-pr:
-    runs-on: "ubuntu-latest"
+    runs-on: "blacksmith-2vcpu-ubuntu-2204"
     steps:
       - name: Checkout feature branch
         uses: actions/checkout@v4
@@ -43,7 +43,12 @@ jobs:
           if [ "$PR_EXISTS" -eq "0" ]; then
             gh pr create --base "$TARGET_BRANCH" --head "$CURRENT_BRANCH" \
               --title "Feature: Merge $CURRENT_BRANCH into $TARGET_BRANCH" \
-              --body "This PR was automatically created by CoFeeBot.\n\n**Triggered by:** @$ACTOR"
+              --body "$(cat <<EOF
+            This PR was automatically created by CoFeeBot.
+
+            **Triggered by:** @$ACTOR
+            EOF
+            )"
             echo "Pull request created successfully"
           else
             echo "Pull request already exists, skipping creation"
