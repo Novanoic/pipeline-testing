@@ -1,4 +1,5 @@
 name: Create PR with CoFeeBot
+
 on:
   workflow_dispatch:
     inputs:
@@ -10,9 +11,11 @@ on:
           - dev
           - stg
           - master
+
 jobs:
   create-pr:
-    runs-on: "blacksmith-2vcpu-ubuntu-2204"
+    runs-on: "ubuntu-latest"
+
     steps:
       - name: Checkout feature branch
         uses: actions/checkout@v4
@@ -26,8 +29,7 @@ jobs:
 
       - name: Determine Target Branch
         id: target
-        run: |
-          echo "branch=${{ github.event.inputs.Branch }}" >> $GITHUB_OUTPUT
+        run: echo "branch=${{ github.event.inputs.Branch }}" >> $GITHUB_OUTPUT
 
       - name: Create Pull Request
         env:
@@ -44,11 +46,11 @@ jobs:
             gh pr create --base "$TARGET_BRANCH" --head "$CURRENT_BRANCH" \
               --title "Feature: Merge $CURRENT_BRANCH into $TARGET_BRANCH" \
               --body "$(cat <<EOF
-            This PR was automatically created by CoFeeBot.
+This PR was automatically created by CoFeeBot.
 
-            **Triggered by:** @$ACTOR
-            EOF
-            )"
+**Triggered by:** @$ACTOR
+EOF
+)"
             echo "Pull request created successfully"
           else
             echo "Pull request already exists, skipping creation"
