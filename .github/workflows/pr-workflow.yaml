@@ -45,12 +45,7 @@ jobs:
           if [ "$PR_EXISTS" -eq "0" ]; then
             gh pr create --base "$TARGET_BRANCH" --head "$CURRENT_BRANCH" \
               --title "Feature: Merge $CURRENT_BRANCH into $TARGET_BRANCH" \
-              --body "$(cat <<EOF
-This PR was automatically created by CoFeeBot.
-
-**Triggered by:** @$ACTOR
-EOF
-)"
+              --body "$(printf "This PR was automatically created by CoFeeBot.\n\n**Triggered by:** @$ACTOR")"
             echo "Pull request created successfully"
           else
             echo "Pull request already exists, skipping creation"
