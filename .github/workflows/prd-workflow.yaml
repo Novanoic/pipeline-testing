@@ -18,19 +18,20 @@ on:
 
 jobs:
   tag:
-    runs-on: ubuntu-latest
+    runs-on: "blacksmith-4vcpu-ubuntu-2204-arm"
     permissions:
       contents: write
+    outputs:
+      VERSION: ${{ steps.create_tag.outputs.VERSION }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Configure Git
         run: |
           git config user.name "Cofee Admin"
           git config user.email "cofee-devops@keyvalue.systems"
-
       - name: Get latest tag
         id: get_latest_tag
         run: |
@@ -43,7 +44,6 @@ jobs:
           echo "MAJOR=$major" >> $GITHUB_ENV
           echo "MINOR=$minor" >> $GITHUB_ENV
           echo "PATCH=$patch" >> $GITHUB_ENV
-
       - name: Create new tag
         id: create_tag
         run: |
@@ -64,6 +64,7 @@ jobs:
           fi
 
           echo "NEW_TAG=$new_tag" >> $GITHUB_ENV
+          echo "VERSION=$new_tag" >> $GITHUB_OUTPUT
 
           # Create and push tag
           git tag -a $new_tag -m "Release $new_tag"
