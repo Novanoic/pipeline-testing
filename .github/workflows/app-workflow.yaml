@@ -2,7 +2,7 @@ name: Version Management
 
 on:
   pull_request:
-    branches: master
+    branches: [develop, main]
   workflow_dispatch:
     inputs:
       versionNumberType:
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
@@ -57,11 +57,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Git
         run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
+          git config user.name "GitHub Actions"
+          git config user.email "github-actions@users.noreply.github.com"
 
       - name: Update version and create tag
         shell: bash
@@ -98,14 +100,18 @@ jobs:
           # Update pubspec.yaml
           sed -i "s/version: $VERSION/version: $NEW_TAG/g" pubspec.yaml
 
-          # Update app_version.dart if it exists
+          # Update app_version.dart with the exact format
           if [ -f "./lib/app/app_version.dart" ]; then
-            sed -i "s/static const String version = \'.*\';/static const String version = \"$NEW_VERSION\";/g" ./lib/app/app_version.dart
+            sed -i "s/static const String version = \".*\"/static const String version = \"$NEW_VERSION\"/" ./lib/app/app_version.dart
+            echo "Updated app_version.dart to version $NEW_VERSION"
+            cat ./lib/app/app_version.dart
+          else
+            echo "Warning: app_version.dart not found"
           fi
 
           # Commit, tag and push
           git add .
           git commit -m "Version bumped to $NEW_TAG"
           git tag $NEW_TAG
-          git push origin $NEW_TAG
-          git push origin ${GITHUB_REF#refs/heads/}
+          git push --tags
+          git push
