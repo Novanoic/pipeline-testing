@@ -1,0 +1,109 @@
+name: Version Management
+
+on:
+  pull_request:
+    branches: develop
+  workflow_dispatch:
+    inputs:
+      versionNumberType:
+        description: "Type of version bump"
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+          - use_existing
+
+jobs:
+  check-version-upgrade:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for version upgrade
+        shell: bash
+        run: |
+          CURR_VERSION=$(sed -n "s/^version:[[:space:]]*\([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p" pubspec.yaml)
+          echo "Current version: $CURR_VERSION"
+          echo "Branch: ${{ github.head_ref }}"
+          echo "Target branch: ${{ github.base_ref }}"
+
+          git diff --unified=0 --ignore-space-at-eol origin/${{ github.base_ref }}..origin/${{ github.head_ref }} -- pubspec.yaml > version_diff.txt
+          OLD_VERSION=$(sed -n "s/^\-version:[[:space:]]*\([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p" version_diff.txt)
+          echo "Old version: $OLD_VERSION"
+
+          if [[ "${{ github.head_ref }}" == "develop" && ("${{ github.base_ref }}" == "stg" || "${{ github.base_ref }}" == "master") ]]; then
+            if [[ ! -z $OLD_VERSION ]]; then
+              echo "Version upgrade found"
+            else
+              echo "Version upgrade not found. Please run the 'Update Version and Tag' workflow to upgrade the version."
+              exit 1
+            fi
+          else
+            echo "Tagging is not required for pull requests to other branches"
+          fi
+
+  update-version-and-tag:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Git
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+
+      - name: Update version and create tag
+        shell: bash
+        run: |
+          echo "Current branch: ${GITHUB_REF#refs/heads/}"
+
+          if [[ "${GITHUB_REF#refs/heads/}" != "develop" ]]; then
+            echo "Tagging can only be done on the develop branch"
+            exit 1
+          fi
+
+          VERSION=$(sed -nE 's/^version:\s*([0-9]+\.[0-9]+\.[0-9]+\+[0-9]+)/\1/p' pubspec.yaml)
+          echo "Current version: $VERSION"
+
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          PATCH=$(echo $VERSION | cut -d"+" -f1 | cut -d"." -f3)
+          BUILD_NUMBER=$(echo $VERSION | cut -d"+" -f2)
+          NEW_BUILD_NUMBER=$(($BUILD_NUMBER + 1))
+
+          if [[ "${{ inputs.versionNumberType }}" == "major" ]]; then 
+            NEW_VERSION=$((MAJOR + 1)).0.0
+          elif [[ "${{ inputs.versionNumberType }}" == "minor" ]]; then 
+            NEW_VERSION=$MAJOR.$((MINOR + 1)).0
+          elif [[ "${{ inputs.versionNumberType }}" == "patch" ]]; then 
+            NEW_VERSION=$MAJOR.$MINOR.$((PATCH + 1))
+          else
+            NEW_VERSION=$MAJOR.$MINOR.$PATCH
+          fi
+
+          NEW_TAG=$NEW_VERSION+$NEW_BUILD_NUMBER
+          echo "New version: $NEW_TAG"
+
+          # Update pubspec.yaml
+          sed -i "s/version: $VERSION/version: $NEW_TAG/g" pubspec.yaml
+
+          # Update app_version.dart if it exists
+          if [ -f "./lib/app/app_version.dart" ]; then
+            sed -i "s/static const String version = \'.*\';/static const String version = \"$NEW_VERSION\";/g" ./lib/app/app_version.dart
+          fi
+
+          # Commit, tag and push
+          git add .
+          git commit -m "Version bumped to $NEW_TAG"
+          git tag $NEW_TAG
+          git push origin $NEW_TAG
+          git push origin ${GITHUB_REF#refs/heads/}
