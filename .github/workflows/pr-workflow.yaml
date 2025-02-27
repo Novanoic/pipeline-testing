@@ -1,4 +1,5 @@
 name: Create PR with CoFeeBot
+
 on:
   workflow_dispatch:
     inputs:
@@ -10,9 +11,11 @@ on:
           - dev
           - stg
           - master
+
 jobs:
   create-pr:
     runs-on: "ubuntu-latest"
+
     steps:
       - name: Checkout feature branch
         uses: actions/checkout@v4
@@ -22,12 +25,11 @@ jobs:
       - name: Set up Git with Bot Identity
         run: |
           git config --global user.name "CoFeeBot"
-          git config --global user.email "devopsadmin+cofee@keyvalue.systems"
+          git config --global user.email "devopsadmin@keyvalue.systems"
 
       - name: Determine Target Branch
         id: target
-        run: |
-          echo "branch=${{ github.event.inputs.branch }}" >> $GITHUB_OUTPUT
+        run: echo "branch=${{ github.event.inputs.Branch }}" >> $GITHUB_OUTPUT
 
       - name: Create Pull Request
         env:
@@ -35,6 +37,7 @@ jobs:
         run: |
           TARGET_BRANCH=${{ steps.target.outputs.branch }}
           CURRENT_BRANCH=${{ github.ref_name }}
+          ACTOR=${{ github.actor }}
 
           # Check if PR already exists
           PR_EXISTS=$(gh pr list --head "$CURRENT_BRANCH" --base "$TARGET_BRANCH" --json number | jq length)
@@ -42,7 +45,7 @@ jobs:
           if [ "$PR_EXISTS" -eq "0" ]; then
             gh pr create --base "$TARGET_BRANCH" --head "$CURRENT_BRANCH" \
               --title "Feature: Merge $CURRENT_BRANCH into $TARGET_BRANCH" \
-              --body "This PR was automatically created by CoFeeBot."
+              --body "$(printf "This PR was automatically created by CoFeeBot.\n\n**Triggered by:** @$ACTOR")"
             echo "Pull request created successfully"
           else
             echo "Pull request already exists, skipping creation"
