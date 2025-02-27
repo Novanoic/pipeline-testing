@@ -2,7 +2,7 @@ name: Version Management
 
 on:
   pull_request:
-    branches: develop
+    branches: master
   workflow_dispatch:
     inputs:
       versionNumberType:
@@ -38,7 +38,7 @@ jobs:
           OLD_VERSION=$(sed -n "s/^\-version:[[:space:]]*\([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p" version_diff.txt)
           echo "Old version: $OLD_VERSION"
 
-          if [[ "${{ github.head_ref }}" == "develop" && ("${{ github.base_ref }}" == "stg" || "${{ github.base_ref }}" == "master") ]]; then
+          if [[ "${{ github.head_ref }}" == "develop" && ("${{ github.base_ref }}" == "stg" || "${{ github.base_ref }}" == "main") ]]; then
             if [[ ! -z $OLD_VERSION ]]; then
               echo "Version upgrade found"
             else
@@ -52,6 +52,8 @@ jobs:
   update-version-and-tag:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
